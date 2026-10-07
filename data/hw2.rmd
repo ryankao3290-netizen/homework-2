@@ -1,0 +1,158 @@
+---
+title: "p8105_hw2_rmk2196.Rmd"
+output: github_document
+date: "2026-10-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r cars}
+library(tidyverse)
+library(readxl)
+
+transit_df =
+  read_csv(
+    "NYC_Transit_Subway_Entrance_And_Exit_Data.csv",
+    col_types = cols(Route8 = "c", Route9 = "c", Route10 = "c", Route11 = "c")
+  ) |>
+  janitor::clean_names() |>
+  select(
+    line, station_name, station_latitude, station_longitude,
+    starts_with("route"), entry, vending, entrance_type, ada
+  ) |>
+  mutate(entry = case_match(entry, "YES" ~ TRUE, "NO" ~ FALSE))
+```
+The data is not tidy. 
+
+```{r}
+transit_df |> distinct(line, station_name) |> nrow()
+
+transit_df |> filter(ada == TRUE) |> distinct(line, station_name) |> nrow()
+
+transit_df |> filter(vending == "NO") |> pull(entry) |> mean()
+```
+1. There are 465 distinct stations
+2. There are 84 stations that are ADA compliant
+3. 0.3770492 is the proportion of station entrances/exits without vending allow entrance
+
+```{r}
+transit_tidy =
+  transit_df |>
+  pivot_longer(
+    route1:route11,
+    names_to = "route_number",
+    names_prefix = "route",
+    values_to = "route_name"
+  ) |>
+  drop_na(route_name)
+
+transit_tidy |> filter(route_name == "A") |> distinct(line, station_name) |> nrow()
+
+transit_tidy |> filter(route_name == "A", ada == TRUE) |> distinct(line, station_name) |> nrow()
+```
+60 stations serve the A train, and 17 of them are ADA compliant
+
+```{r}
+trash_path = "202610 Trash Wheel Collection Data.xlsx"
+
+mr_trash =
+  read_excel(trash_path, sheet = "Mr. Trash Wheel", range = cell_cols("A:N")) |>
+  janitor::clean_names() |>
+  drop_na(dumpster) |>
+  mutate(
+    sports_balls = as.integer(round(sports_balls)),
+    year = as.numeric(year),
+    trash_wheel = "Mr. Trash Wheel"
+  )
+
+prof_trash =
+  read_excel(
+    trash_path, sheet = "Professor Trash Wheel",
+    range = cell_cols("A:M"), na = c("", "dive")
+  ) |>
+  janitor::clean_names() |>
+  drop_na(dumpster) |>
+  mutate(trash_wheel = "Professor Trash Wheel")
+
+gwynnda =
+  read_excel(
+    trash_path, sheet = "Gwynnda the Good Wheel of the W",
+    range = cell_cols("A:L")
+  ) |>
+  janitor::clean_names() |>
+  drop_na(dumpster) |>
+  mutate(trash_wheel = "Gwynnda")
+
+trash_df = bind_rows(mr_trash, prof_trash, gwynnda) |> relocate(trash_wheel)
+```
+nrow(trash_df): 1269
+ncol(trash_df): 15
+Mr./Professor/Gwynnda rows:	740/137/392
+Professor total weight: 294.96 tons
+Gwynnda cigarette butts, June 2022: 18,120
+
+The combined dataset has `r nrow(trash_df)` observations and `r ncol(trash_df)`
+variables, where each row is one dumpster filled by one of three trash wheels:
+Mr. Trash Wheel (`r nrow(mr_trash)` dumpsters), Professor Trash Wheel
+(`r nrow(prof_trash)`), and Gwynnda (`r nrow(gwynnda)`). Key variables include
+`trash_wheel`, which identifies the wheel; `dumpster`, `date`, `month`, and
+`year`, which identify when each dumpster was collected; `weight_tons` and
+`volume_cubic_yards`, which measure how much trash it held; and counts of
+specific items such as `plastic_bottles`, `cigarette_butts`, and `wrappers`.
+`homes_powered` estimates how many homes could be powered by the electricity
+generated from the trash. Not every wheel records every item: `sports_balls`
+is only recorded for Mr. Trash Wheel, and `glass_bottles` is not recorded for
+Gwynnda, so these are missing for the other wheels. For the available data,
+Professor Trash Wheel collected a total of
+`r trash_df |> filter(trash_wheel == "Professor Trash Wheel") |> pull(weight_tons) |> sum(na.rm = TRUE)`
+tons of trash, and Gwynnda collected
+`r trash_df |> filter(trash_wheel == "Gwynnda", month == "June", year == 2022) |> pull(cigarette_butts) |> sum(na.rm = TRUE) |> format(big.mark = ",")`
+cigarette butts in June 2022.
+
+```{r}
+baseline_raw =
+  read_csv("MCI_baseline.csv", skip = 1, na = c(".", "NA", "")) |>
+  janitor::clean_names() |>
+  mutate(
+    sex = case_match(sex, 1 ~ "male", 0 ~ "female"),
+    apoe4 = case_match(apoe4, 1 ~ "carrier", 0 ~ "non-carrier")
+  )
+
+baseline_df =
+  baseline_raw |>
+  filter(is.na(age_at_onset) | age_at_onset > current_age)
+```
+```{r}
+nrow(baseline_raw)                                   # recruited
+nrow(baseline_df)                                    # met inclusion criteria
+baseline_df |> drop_na(age_at_onset) |> nrow()       # developed MCI
+baseline_df |> pull(current_age) |> mean()           # average baseline age
+baseline_df |> filter(sex == "female") |> pull(apoe4) |> (\(x) mean(x == "carrier"))()
+```
+
+```{r}
+amyloid_df =
+  read_csv("mci_amyloid.csv", skip = 1, na = c("NA", "Na", "")) |>
+  janitor::clean_names() |>
+  rename(id = study_id) |>
+  pivot_longer(
+    baseline:time_8,
+    names_to = "time",
+    values_to = "amyloid_ratio"
+  ) |>
+  mutate(amyloid_ratio = as.numeric(amyloid_ratio))
+```
+```{r}
+anti_join(baseline_df, amyloid_df, by = "id") |> distinct(id) |> nrow()  # baseline only
+anti_join(amyloid_df, baseline_df, by = "id") |> distinct(id) |> nrow()  # amyloid only
+
+mci_df = inner_join(baseline_df, amyloid_df, by = "id")
+
+write_csv(mci_df, "data/mci_combined.csv")
+```
+
+
